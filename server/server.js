@@ -1,9 +1,9 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const connectDB = require('./config/db');
-const axios = require('axios');
-const Timer = require('./models/Timer');
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const connectDB = require("./config/db");
+const axios = require("axios");
+const Timer = require("./models/Timer");
 
 const app = express();
 connectDB();
@@ -11,59 +11,123 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 
-// to fetch time from git api
-app.get('/api/fork-time', async (req, res) => {
-  try {
-    const response = await axios.get(
-      `https://api.github.com/repos/pankajexa/fs-assessment/forks`
-    );
-    
-    const myFork = response.data.find(
-      fork => fork.owner.login === process.env.GITHUB_USERNAME
-    );
-    
-    if (!myFork) {
-      return res.status(404).json({ message: 'Fork not found' });
-    }
-    
-    res.json({ forkTime: myFork.created_at });
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching fork time' });
-  }
-});
-
 // to create new timer
-app.post('/api/timer', async (req, res) => {
+app.get("/api/timer", async (req, res) => {
   try {
-    const { assessmentStartTime } = req.body;
-    const timer = new Timer({
-      assessmentStartTime: new Date(assessmentStartTime)
-    });
-    
-    await timer.save();
-    res.status(201).json(timer);
+    if ((await Timer.countDocuments({})) > 0) {
+      const timer = await Timer.findOne({}).lean();
+      res.status(200).json(timer);
+    } else {
+      const response = await axios.get(
+        `https://api.github.com/repos/pankajexa/fs-assessment/forks`
+      );
+
+      const myFork = response.data.find(
+        (fork) => fork.owner.login === process.env.GITHUB_USERNAME
+      );
+
+      if (!myFork) {
+        return res.status(404).json({ message: "Fork not found" });
+      }
+
+      const timer = new Timer({
+        assessmentStartTime: new Date(myFork.created_at),
+      });
+
+      await timer.save();
+      res.status(201).json(timer);
+    }
   } catch (error) {
-    res.status(500).json({ message: 'Failed to create the timer' });
+    res.status(500).json({ message: "Failed to create the timer" });
   }
 });
 
 // to complete timer
-app.post('/api/timer/complete', async (req, res) => {
+app.post("/api/timer/complete", async (req, res) => {
   try {
     const timer = await Timer.findById(req.body.timerId);
-    
+
     if (!timer) {
-      return res.status(404).json({ message: 'ID does not exist' });
+      return res.status(404).json({ message: "ID does not exist" });
     }
-    
+
     timer.assessmentEndTime = new Date();
     timer.totalTime = timer.assessmentEndTime - timer.assessmentStartTime;
-    timer.status = 'completed';
-    
+    timer.status = "completed";
+
     await timer.save();
     res.json(timer);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to update the timer' });
+    res.status(500).json({ message: "Failed to update the timer" });
+  }
+});
+
+// to pause timer
+app.post("/api/timer/pause", async (req, res) => {
+  try {
+    const timer = await Timer.findById(req.body.timerId);
+
+    if (!timer) {
+      return res.status(404).json({ message: "Timer not found" });
+    }
+
+    if (timer.isPaused) {
+      return res.status(400).json({ message: "Timer is already paused" });
+    }
+
+    // Mark the timer as paused and record the pause start time
+    timer.isPaused = true;
+    timer.pauseStartTime = new Date();
+    timer.status = "paused"; // Set status to 'paused'
+    timer.lastModified = new Date();
+
+    await timer.save();
+    res.status(200).json({ message: "Timer paused successfully", timer });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to pause the timer" });
+  }
+});
+
+// to resume timer
+app.post("/api/timer/resume", async (req, res) => {
+  try {
+    const timer = await Timer.findById(req.body.timerId);
+
+    if (!timer) {
+      return res.status(404).json({ message: "Timer not found" });
+    }
+
+    if (!timer.isPaused) {
+      return res.status(400).json({ message: "Timer is not paused" });
+    }
+
+    // Calculate the paused duration
+    const pauseDuration = new Date() - timer.pauseStartTime;
+    timer.totalPausedTime += pauseDuration; // Add the pause duration to totalPausedTime
+    timer.isPaused = false;
+    timer.pauseStartTime = null;
+    timer.status = "in-progress"; // Set status to 'in-progress' when resumed
+    timer.lastModified = new Date();
+
+    await timer.save();
+    res.status(200).json({ message: "Timer resumed successfully", timer });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to resume the timer" });
+  }
+});
+
+// to delete timer
+app.delete("/api/timer", async (req, res) => {
+  try {
+    const timer = await Timer.findOneAndDelete({});
+
+    if (!timer) {
+      return res.status(404).json({ message: "Timer not found" });
+    }
+
+    res.status(200).json({ message: "Timer deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete the timer" });
   }
 });
 
