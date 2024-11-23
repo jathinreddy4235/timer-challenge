@@ -14,29 +14,36 @@ app.use(express.json());
 // to create new timer
 app.get("/api/timer", async (req, res) => {
   try {
-    if ((await Timer.countDocuments({})) > 0) {
+    const isADocumentExisting = await Timer.countDocuments({});
+    if (isADocumentExisting > 0) {
       const timer = await Timer.findOne({}).lean();
-      res.status(200).json(timer);
-    } else {
-      const response = await axios.get(
-        `https://api.github.com/repos/pankajexa/fs-assessment/forks`
-      );
 
-      const myFork = response.data.find(
-        (fork) => fork.owner.login === process.env.GITHUB_USERNAME
-      );
-
-      if (!myFork) {
-        return res.status(404).json({ message: "Fork not found" });
+      if (timer.status !== 'completed') {
+        res.status(200).json(timer);
+        return;
+      } else {
+        await Timer.findOneAndDelete({});
       }
+    } 
 
-      const timer = new Timer({
-        assessmentStartTime: new Date(myFork.created_at),
-      });
+    const response = await axios.get(
+      `https://api.github.com/repos/pankajexa/fs-assessment/forks`
+    );
 
-      await timer.save();
-      res.status(201).json(timer);
+    const myFork = response.data.find(
+      (fork) => fork.owner.login === process.env.GITHUB_USERNAME
+    );
+
+    if (!myFork) {
+      return res.status(404).json({ message: "Fork not found" });
     }
+
+    const timer = new Timer({
+      assessmentStartTime: new Date(myFork.created_at),
+    });
+
+    await timer.save();
+    res.status(201).json(timer);
   } catch (error) {
     res.status(500).json({ message: "Failed to create the timer" });
   }
@@ -113,21 +120,6 @@ app.post("/api/timer/resume", async (req, res) => {
     res.status(200).json({ message: "Timer resumed successfully", timer });
   } catch (error) {
     res.status(500).json({ message: "Failed to resume the timer" });
-  }
-});
-
-// to delete timer
-app.delete("/api/timer", async (req, res) => {
-  try {
-    const timer = await Timer.findOneAndDelete({});
-
-    if (!timer) {
-      return res.status(404).json({ message: "Timer not found" });
-    }
-
-    res.status(200).json({ message: "Timer deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to delete the timer" });
   }
 });
 
